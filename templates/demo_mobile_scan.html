@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PUI Demo - Escaner movil</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f6f8fc; margin: 0; }
+    .container { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.07); }
+    h1 { margin-top: 0; }
+    label { display: block; margin-top: 12px; margin-bottom: 6px; font-size: 14px; }
+    input, select, button, textarea { width: 100%; padding: 10px; border: 1px solid #cfd7e3; border-radius: 8px; box-sizing: border-box; }
+    button { border: none; color: #fff; font-weight: bold; cursor: pointer; }
+    .btn-ok { background: #0f9d58; margin-top: 14px; }
+    .btn-reject { background: #c62828; margin-top: 8px; }
+    .btn-refresh { background: #0a66c2; margin-top: 8px; }
+    .status { margin-top: 14px; padding: 10px; border-radius: 8px; background: #eef3fb; }
+    .error { background: #fde7ea; color: #7f1d2d; }
+    .success { background: #e7f7ee; color: #146c37; }
+    .code { font-family: Consolas, monospace; background: #f7f9fc; padding: 8px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Escaneo movil y consentimiento</h1>
+      <p>Simula la app del celular para aprobar el acceso QR.</p>
+
+      <label for="requestId">Request ID</label>
+      <input id="requestId" value="{{ request_id }}">
+
+      <button class="btn-refresh" id="btnLoad">Cargar solicitud</button>
+
+      <div id="requestInfo" class="status">Carga una solicitud para continuar.</div>
+
+      <label for="authUser">Usuario autenticado</label>
+      <select id="authUser"></select>
+
+      <label for="context">Actuar como</label>
+      <select id="context"></select>
+
+      <label for="purpose">Finalidad</label>
+      <input id="purpose" value="Ingreso al portal por QR">
+
+      <button class="btn-ok" id="btnApprove">Aprobar acceso</button>
+      <button class="btn-reject" id="btnReject">Rechazar acceso</button>
+
+      <div id="preview" class="status">Vista previa de consentimiento pendiente.</div>
+      <label for="result">Resultado</label>
+      <textarea id="result" rows="10" readonly>-</textarea>
+    </div>
+  </div>
+
+  <script>
+    const requestIdEl = document.getElementById("requestId");
+    const authUserEl = document.getElementById("authUser");
+    const contextEl = document.getElementById("context");
+    const purposeEl = document.getElementById("purpose");
+    const requestInfoEl = document.getElementById("requestInfo");
+    const previewEl = document.getElementById("preview");
+    const resultEl = document.getElementById("result");
+    const btnLoad = document.getElementById("btnLoad");
+    const btnApprove = document.getElementById("btnApprove");
+    const btnReject = document.getElementById("btnReject");
+
+    let currentRequest = null;
+    let currentPreview = null;
+
+    async function loadPeople() {
+      const res = await fetch("/profiles/device_demo_01");
+      const people = await res.json();
+      authUserEl.innerHTML = "";
+      for (const person of people) {
+        const opt = document.createElement("option");
+        opt.value = person.person_id;
+        opt.textContent = person.name + " (" + person.person_id + ")";
+        authUserEl.appendChild(opt);
+      }
+      await loadContexts();
+    }
+
+    async function loadContexts() {
+      const userId = authUserEl.value;
+      const res = await fetch("/contexts/" + encodeURIComponent(userId));
+      const contexts = await res.json();
+      contextEl.innerHTML = "";
+      for (const ctx of contexts) {
+        const opt = document.createElement("option");
+        opt.value = ctx.acting_as;
+        opt.dataset.role = ctx.role;
+        opt.textContent = ctx.label + " [" + ctx.acting_as + "]";
+        contextEl.appendChild(opt);
+      }
+    }
+
+    async function loadRequest() {
+      const requestId = requestIdEl.value.trim();
+      if (!requestId) {
+        requestInfoEl.className = "status error";
+        requestInfoEl.textContent = "Ingresa un request_id.";
+        return;
+      }
+
+      const res = await fetch("/access-requests/" + encodeURIComponent(requestId));
+      const payload = await res.json();
+      if (!res.ok) {
+        requestInfoEl.className = "status error";
+        requestInfoEl.textContent = payload.error || "No se pudo cargar solicitud";
+        return;
+      }
+
+      currentRequest = payload;
+      requestInfoEl.className = "status";
+      requestInfoEl.innerHTML = "<b>Solicitud cargada:</b><br>" +
+        "request_id: <span class='code'>" + payload.request_id + "</span><br>" +
+        "institucion_id: " + payload.institution_id + "<br>" +
+        "procedure_id: " + payload.procedure_id + "<br>" +
+        "expira: " + payload.expires_at;
+      resultEl.value = "-";
+      previewEl.textContent = "Vista previa de consentimiento pendiente.";
+    }
+
+    async function buildPreview() {
+      if (!currentRequest) {
+        throw new Error("Primero carga una solicitud valida.");
+      }
+
+      const body = {
+        request_id: currentRequest.request_id,
+        authenticated_user_id: authUserEl.value,
+        acting_as_id: contextEl.value,
+        purpose: purposeEl.value
+      };
+
+      const res = await fetch("/consent/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || "Error en preview");
+      }
+      currentPreview = payload;
+      previewEl.className = "status";
+      previewEl.textContent = "Se compartira: " + JSON.stringify(payload.shareable_attrs);
+      return payload;
+    }
+
+    async function approve() {
+      try {
+        const preview = await buildPreview();
+        const body = {
+          request_id: preview.request_id,
+          authenticated_user_id: authUserEl.value,
+          acting_as_id: contextEl.value,
+          purpose: purposeEl.value,
+          approved_attrs: preview.required_attrs
+        };
+
+        const res = await fetch("/consent/approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.error || "Error al aprobar");
+        }
+
+        previewEl.className = "status success";
+        previewEl.textContent = "Aprobado correctamente.";
+        resultEl.value = JSON.stringify(payload, null, 2);
+      } catch (e) {
+        previewEl.className = "status error";
+        previewEl.textContent = String(e);
+      }
+    }
+
+    async function reject() {
+      try {
+        if (!currentRequest) {
+          throw new Error("Primero carga una solicitud valida.");
+        }
+        const body = {
+          request_id: currentRequest.request_id,
+          authenticated_user_id: authUserEl.value,
+          acting_as_id: contextEl.value,
+          reason: "Rechazo desde app movil demo"
+        };
+        const res = await fetch("/consent/reject", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.error || "Error al rechazar");
+        }
+        previewEl.className = "status error";
+        previewEl.textContent = "Solicitud rechazada.";
+        resultEl.value = JSON.stringify(payload, null, 2);
+      } catch (e) {
+        previewEl.className = "status error";
+        previewEl.textContent = String(e);
+      }
+    }
+
+    authUserEl.addEventListener("change", loadContexts);
+    btnLoad.addEventListener("click", loadRequest);
+    btnApprove.addEventListener("click", approve);
+    btnReject.addEventListener("click", reject);
+
+    loadPeople()
+      .then(() => {
+        if (requestIdEl.value.trim()) {
+          loadRequest();
+        }
+      })
+      .catch((e) => {
+        requestInfoEl.className = "status error";
+        requestInfoEl.textContent = "Error inicializando pantalla: " + e;
+      });
+  </script>
+</body>
+</html>

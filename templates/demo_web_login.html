@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PUI Demo - Portal Web con QR</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f7fb; margin: 0; }
+    .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.07); }
+    h1 { margin-top: 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    label { font-size: 14px; color: #333; display: block; margin-bottom: 6px; }
+    select, input, button, textarea { width: 100%; padding: 10px; border: 1px solid #cfd7e3; border-radius: 8px; box-sizing: border-box; }
+    button { background: #0a66c2; color: #fff; cursor: pointer; border: none; font-weight: bold; }
+    button:hover { background: #08559f; }
+    .muted { color: #666; font-size: 13px; }
+    #qr { margin-top: 12px; min-height: 220px; display: flex; align-items: center; justify-content: center; }
+    .status { margin-top: 12px; padding: 10px; border-radius: 8px; background: #eef3fb; }
+    .success { background: #e7f7ee; color: #146c37; }
+    .warn { background: #fff3cd; color: #7d5a00; }
+    .error { background: #fde7ea; color: #7f1d2d; }
+    .code { font-family: Consolas, monospace; font-size: 13px; background: #f7f9fc; padding: 8px; border-radius: 8px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Portal web - Login con QR</h1>
+      <p class="muted">Este simula el portal institucional. Genera una solicitud QR y espera aprobacion desde la pantalla movil.</p>
+
+      <div class="grid">
+        <div>
+          <label for="institution">Institucion</label>
+          <select id="institution"></select>
+        </div>
+        <div>
+          <label for="procedure">Tramite</label>
+          <select id="procedure"></select>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button id="btnGenerate">Generar QR de acceso</button>
+      </div>
+
+      <div class="grid" style="margin-top: 16px;">
+        <div>
+          <div id="qr" class="card" style="box-shadow:none; border:1px dashed #cfd7e3;">Aun no hay QR</div>
+          <div id="mobileLink" class="muted"></div>
+        </div>
+        <div>
+          <div id="status" class="status">Estado: esperando solicitud.</div>
+          <p class="muted" style="margin-top: 10px;">Request ID:</p>
+          <div id="requestId" class="code">-</div>
+          <p class="muted" style="margin-top: 10px;">Sesion resultante:</p>
+          <div id="sessionMessage" class="code">-</div>
+          <p class="muted" style="margin-top: 10px;">Atributos compartidos:</p>
+          <textarea id="attrs" rows="8" readonly>-</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let catalog = null;
+    let pollTimer = null;
+
+    const institutionEl = document.getElementById("institution");
+    const procedureEl = document.getElementById("procedure");
+    const btnGenerate = document.getElementById("btnGenerate");
+    const qrEl = document.getElementById("qr");
+    const statusEl = document.getElementById("status");
+    const requestIdEl = document.getElementById("requestId");
+    const sessionMessageEl = document.getElementById("sessionMessage");
+    const attrsEl = document.getElementById("attrs");
+    const mobileLinkEl = document.getElementById("mobileLink");
+
+    async function loadCatalog() {
+      const res = await fetch("/demo/catalog");
+      catalog = await res.json();
+
+      institutionEl.innerHTML = "";
+      for (const institution of catalog.institutions) {
+        const opt = document.createElement("option");
+        opt.value = institution.institution_id;
+        opt.textContent = institution.name + " (" + institution.domain + ")";
+        institutionEl.appendChild(opt);
+      }
+
+      renderProcedures();
+    }
+
+    function renderProcedures() {
+      const institutionId = institutionEl.value;
+      procedureEl.innerHTML = "";
+      const procedures = catalog.procedures.filter(p => p.institution_id === institutionId);
+      for (const procedure of procedures) {
+        const opt = document.createElement("option");
+        opt.value = procedure.procedure_id;
+        opt.textContent = procedure.name;
+        procedureEl.appendChild(opt);
+      }
+    }
+
+    async function generateQr() {
+      statusEl.className = "status";
+      statusEl.textContent = "Creando solicitud de acceso...";
+      attrsEl.value = "-";
+      sessionMessageEl.textContent = "-";
+
+      const institutionId = institutionEl.value;
+      const institution = catalog.institutions.find(i => i.institution_id === institutionId);
+      const procedureId = procedureEl.value;
+
+      const res = await fetch("/access-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          institution_id: institutionId,
+          domain: institution.domain,
+          procedure_id: procedureId,
+          ttl_seconds: 180
+        })
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        statusEl.className = "status error";
+        statusEl.textContent = "Error al crear request: " + (payload.error || "desconocido");
+        return;
+      }
+
+      const requestId = payload.request_id;
+      requestIdEl.textContent = requestId;
+      const mobileUrl = window.location.origin + "/demo/mobile?request_id=" + encodeURIComponent(requestId);
+      mobileLinkEl.innerHTML = "Abre en celular: <a href=\"" + mobileUrl + "\" target=\"_blank\">" + mobileUrl + "</a>";
+
+      qrEl.innerHTML = "";
+      new QRCode(qrEl, {
+        text: mobileUrl,
+        width: 220,
+        height: 220
+      });
+
+      startPolling(requestId);
+    }
+
+    function startPolling(requestId) {
+      if (pollTimer) clearInterval(pollTimer);
+
+      statusEl.className = "status warn";
+      statusEl.textContent = "QR generado. Esperando aprobacion desde movil...";
+
+      pollTimer = setInterval(async () => {
+        const res = await fetch("/access-requests/" + encodeURIComponent(requestId) + "/status");
+        const payload = await res.json();
+        if (!res.ok) {
+          statusEl.className = "status error";
+          statusEl.textContent = "Error consultando estado: " + (payload.error || "desconocido");
+          clearInterval(pollTimer);
+          return;
+        }
+
+        if (payload.status === "approved" && payload.consent) {
+          statusEl.className = "status success";
+          statusEl.textContent = "Acceso aprobado.";
+          sessionMessageEl.textContent = payload.session_message || "-";
+          attrsEl.value = JSON.stringify(payload.consent.approved_attrs, null, 2);
+          clearInterval(pollTimer);
+        } else if (payload.status === "rejected") {
+          statusEl.className = "status error";
+          statusEl.textContent = "Acceso rechazado.";
+          clearInterval(pollTimer);
+        } else {
+          statusEl.className = "status warn";
+          statusEl.textContent = "Estado actual: " + payload.status + ". Esperando aprobacion...";
+        }
+      }, 2000);
+    }
+
+    institutionEl.addEventListener("change", renderProcedures);
+    btnGenerate.addEventListener("click", generateQr);
+
+    loadCatalog().catch((e) => {
+      statusEl.className = "status error";
+      statusEl.textContent = "No se pudo cargar catalogo: " + e;
+    });
+  </script>
+</body>
+</html>
