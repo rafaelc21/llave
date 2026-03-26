@@ -168,7 +168,7 @@
           statusEl.className = "status success";
           statusEl.textContent = "Acceso aprobado.";
           sessionMessageEl.textContent = payload.session_message || "-";
-          attrsEl.value = JSON.stringify(payload.consent.approved_attrs, null, 2);
+          attrsEl.value = JSON.stringify(payload.shared_attrs || {}, null, 2);
           clearInterval(pollTimer);
         } else if (payload.status === "rejected") {
           statusEl.className = "status error";

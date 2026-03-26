@@ -299,6 +299,12 @@ class PUIService:
             procedure_id=procedure.procedure_id,
         )
 
+        if "tutor_name" in procedure.required_attrs and role == "self":
+            raise ValidationError(
+                "Este tramite requiere actuar en representacion de un tutor. "
+                "Selecciona un usuario tutor y el contexto de representacion."
+            )
+
         person_attrs = self.person_attributes(
             authenticated_user_id=authenticated_user_id,
             acting_as_id=acting_as_id,
@@ -307,6 +313,14 @@ class PUIService:
         requested = procedure.required_attrs + procedure.optional_attrs
         shareable_attrs = {k: person_attrs[k] for k in requested if k in person_attrs}
         blocked_attrs = [k for k in requested if k not in shareable_attrs]
+        missing_required = [
+            attr for attr in procedure.required_attrs if attr not in shareable_attrs
+        ]
+        if missing_required:
+            raise ValidationError(
+                "El contexto seleccionado no puede compartir atributos obligatorios: "
+                f"{missing_required}. Cambia de contexto o usuario."
+            )
 
         return {
             "request_id": access_request.request_id,
@@ -544,6 +558,15 @@ class PUIService:
                 return consent
         return None
 
+    def get_approved_audit_event_by_request(self, request_id: str) -> AuditEvent | None:
+        for event in reversed(self.audit_events):
+            if (
+                event.action == "consent_approved"
+                and event.details.get("request_id") == request_id
+            ):
+                return event
+        return None
+
     def get_request_status(self, request_id: str) -> dict[str, Any]:
         request_obj = self.require_access_request(request_id)
         result: dict[str, Any] = {
@@ -566,6 +589,8 @@ class PUIService:
             "purpose": consent.purpose,
             "expires_at": iso(consent.expires_at),
         }
+        event = self.get_approved_audit_event_by_request(request_id)
+        result["shared_attrs"] = event.shared_attrs if event else {}
         result["session_message"] = self.build_session_message(
             authenticated_user_id=consent.authenticated_user_id,
             acting_as_id=consent.acting_as_id,
