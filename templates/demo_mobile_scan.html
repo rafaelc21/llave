@@ -109,7 +109,17 @@
       const payload = await res.json();
       if (!res.ok) {
         requestInfoEl.className = "status error";
-        requestInfoEl.textContent = payload.error || "No se pudo cargar solicitud";
+        const rawError = payload.error || "No se pudo cargar solicitud";
+        if (rawError.includes("Solicitud no encontrada")) {
+          requestInfoEl.innerHTML =
+            "Solicitud no encontrada. Esto suele pasar si el request expiro o el backend " +
+            "reinicio.<br><br>" +
+            "1) Regenera el QR en <b>/demo/web</b><br>" +
+            "2) Abre el link del QR inmediatamente en movil<br>" +
+            "3) Si estas en hosting serverless (ej. Vercel), usa una BD/Redis para persistir requests.";
+        } else {
+          requestInfoEl.textContent = rawError;
+        }
         return;
       }
 
