@@ -15,6 +15,7 @@
     .btn-ok { background: #0f9d58; margin-top: 14px; }
     .btn-reject { background: #c62828; margin-top: 8px; }
     .btn-refresh { background: #0a66c2; margin-top: 8px; }
+    .btn-wallet { background: #1f1f1f; margin-top: 8px; }
     .status { margin-top: 14px; padding: 10px; border-radius: 8px; background: #eef3fb; }
     .error { background: #fde7ea; color: #7f1d2d; }
     .success { background: #e7f7ee; color: #146c37; }
@@ -48,6 +49,7 @@
 
       <button class="btn-ok" id="btnApprove">Aprobar acceso</button>
       <button class="btn-reject" id="btnReject">Rechazar acceso</button>
+      <button class="btn-wallet" id="btnGoogleWallet">Agregar a Google Wallet</button>
 
       <div id="preview" class="status">Vista previa de consentimiento pendiente.</div>
       <label for="result">Resultado</label>
@@ -66,6 +68,7 @@
     const btnLoad = document.getElementById("btnLoad");
     const btnApprove = document.getElementById("btnApprove");
     const btnReject = document.getElementById("btnReject");
+    const btnGoogleWallet = document.getElementById("btnGoogleWallet");
 
     let currentRequest = null;
     let currentPreview = null;
@@ -220,10 +223,40 @@
       }
     }
 
+    async function addToGoogleWallet() {
+      try {
+        if (!currentRequest) {
+          throw new Error("Primero carga una solicitud valida.");
+        }
+
+        const params = new URLSearchParams({
+          request_id: currentRequest.request_id,
+          authenticated_user_id: authUserEl.value || "",
+          acting_as_id: contextEl.value || "",
+          target_url: window.location.href
+        });
+
+        const res = await fetch("/wallet/google/add-url?" + params.toString());
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.error || "No se pudo generar enlace de Google Wallet");
+        }
+        if (!payload.wallet_url) {
+          throw new Error("No se genero URL de Google Wallet");
+        }
+
+        window.open(payload.wallet_url, "_blank");
+      } catch (e) {
+        previewEl.className = "status error";
+        previewEl.textContent = String(e);
+      }
+    }
+
     authUserEl.addEventListener("change", loadContexts);
     btnLoad.addEventListener("click", loadRequest);
     btnApprove.addEventListener("click", approve);
     btnReject.addEventListener("click", reject);
+    btnGoogleWallet.addEventListener("click", addToGoogleWallet);
 
     loadPeople()
       .then(() => {

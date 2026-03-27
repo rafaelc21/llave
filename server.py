@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from urllib.parse import quote_plus
+
 from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
@@ -162,6 +165,51 @@ def demo_catalog():
             "default_device_id": "device_demo_01",
         }
     )
+
+
+@app.get("/wallet/google/add-url")
+def google_wallet_add_url():
+    request_id = request.args.get("request_id", "").strip()
+    authenticated_user_id = request.args.get("authenticated_user_id", "").strip()
+    acting_as_id = request.args.get("acting_as_id", "").strip()
+
+    if not request_id:
+        raise ValidationError("request_id es obligatorio para generar enlace de Wallet.")
+
+    service.require_access_request(request_id)
+
+    target_url = (
+        request.args.get("target_url", "").strip()
+        or f"{request.host_url.rstrip('/')}/demo/mobile?request_id={quote_plus(request_id)}"
+    )
+
+    template = os.getenv("GOOGLE_WALLET_SAVE_URL_TEMPLATE", "").strip()
+    if not template:
+        return (
+            jsonify(
+                {
+                    "configured": False,
+                    "error": (
+                        "Google Wallet no esta configurado. Define la variable "
+                        "GOOGLE_WALLET_SAVE_URL_TEMPLATE."
+                    ),
+                    "target_url": target_url,
+                    "example_template": (
+                        "https://pay.google.com/gp/v/save/TU_JWT"
+                    ),
+                }
+            ),
+            501,
+        )
+
+    wallet_url = template.format(
+        request_id=request_id,
+        authenticated_user_id=authenticated_user_id or "anon",
+        acting_as_id=acting_as_id or "anon",
+        target_url=quote_plus(target_url),
+    )
+
+    return jsonify({"configured": True, "wallet_url": wallet_url, "target_url": target_url})
 
 
 if __name__ == "__main__":

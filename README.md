@@ -64,6 +64,18 @@ Flujo recomendado:
 3. En `demo/mobile`, carga la solicitud, elige usuario/contexto y aprueba.
 4. Regresa a `demo/web`: la sesion cambia a **aprobado** automaticamente por polling.
 
+### Boton "Agregar a Google Wallet" (demo)
+
+La pantalla `demo/mobile` ya incluye el boton **Agregar a Google Wallet**.
+
+Para habilitarlo, define esta variable de entorno en tu servidor:
+
+- `GOOGLE_WALLET_SAVE_URL_TEMPLATE`
+
+Valor esperado: URL final de guardado de Google Wallet (normalmente `https://pay.google.com/gp/v/save/<JWT>`).
+
+Si no esta configurada, el sistema mostrara un mensaje indicando que falta la configuracion.
+
 ## Flujo de ejemplo (inscripcion escolar)
 
 1) Crear solicitud QR:
